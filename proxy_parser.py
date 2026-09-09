@@ -120,9 +120,39 @@ def parse_uri(uri, name):
     raise ValueError(f'unsupported scheme: {scheme}')
 
 def write_config(proxies, path, secret):
-    # JSON is accepted by Mihomo as configuration, while output remains plain URI text.
-    cfg={'mixed-port': 0, 'mode':'rule', 'allow-lan':False, 'log-level':'silent', 'external-controller':'127.0.0.1:9090', 'secret':secret, 'proxies':proxies, 'rules':['MATCH,DIRECT']}
+    # JSON is accepted by Mihomo. A single URLTest group lets Mihomo test all
+    # proxies through one API request instead of making one HTTP request per node.
+    names = [p['name'] for p in proxies]
+    cfg = {
+        'mixed-port': 0,
+        'mode': 'rule',
+        'allow-lan': False,
+        'log-level': 'silent',
+        'external-controller': '127.0.0.1:9090',
+        'secret': secret,
+        'proxies': proxies,
+        'proxy-groups': [{
+            'name': 'HEALTH',
+            'type': 'url-test',
+            'proxies': names,
+            'url': TEST_URL,
+            'interval': 3600,
+            'lazy': False,
+        }],
+        'rules': ['MATCH,DIRECT'],
+    }
     path.write_text(json.dumps(cfg, ensure_ascii=False), encoding='utf-8')
+
+def api_group_delay(secret):
+    url = 'http://127.0.0.1:9090/group/' + urllib.parse.quote('HEALTH', safe='') + '/delay?' + urllib.parse.urlencode({
+        'url': TEST_URL,
+        'timeout': TIMEOUT_MS,
+    })
+    req = urllib.request.Request(url, headers={'Authorization': f'Bearer {secret}'})
+    # One request tests the whole group. The timeout here is only a safety
+    # limit for the controller request itself.
+    with urllib.request.urlopen(req, timeout=max(TIMEOUT_MS / 1000 + 15, 30)) as r:
+        return json.loads(r.read().decode())
 
 def api_delay(name, secret):
     url='http://127.0.0.1:9090/proxies/' + urllib.parse.quote(name, safe='') + '/delay?' + urllib.parse.urlencode({'url':TEST_URL,'timeout':TIMEOUT_MS})
@@ -170,15 +200,19 @@ def main():
                     urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:9090/version',headers={'Authorization':f'Bearer {secret}'}),timeout=1); break
                 except Exception: time.sleep(.25)
             else: raise RuntimeError('mihomo API did not start')
-            # Sequential requests are intentional: the same core handles all nodes and avoids spawning one process per proxy.
+            print(f'[CHECK] Testing {len(meta)} proxies through one Mihomo health-check request...')
+            try:
+                results = api_group_delay(secret)
+            except Exception as e:
+                raise RuntimeError(f'group health-check failed: {e}')
+
             for i,(name,uri) in enumerate(meta,1):
-                try:
-                    delay=api_delay(name,secret)
-                    if delay > 0:
-                        good.append(uri.split('#',1)[0])
-                        print(f'[OK] #{i} {delay} ms')
-                    else: print(f'[FAIL] #{i}')
-                except Exception as e: print(f'[FAIL] #{i} {e}')
+                delay = int(results.get(name, 0) or 0)
+                if delay > 0:
+                    good.append(uri.split('#',1)[0])
+                    print(f'[OK] #{i} {delay} ms')
+                else:
+                    print(f'[FAIL] #{i}')
         finally:
             proc.terminate()
             try: proc.wait(timeout=5)
