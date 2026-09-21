@@ -9,8 +9,17 @@ MAX_BYTES = 20 * 1024 * 1024
 
 URI_RE = re.compile(r"(?i)\b(?:vless|vmess|trojan|ss|ssr|hysteria2?|hy2|tuic|anytls|socks5?|http)://[^\s<>\"']+")
 
+# Happ-compatible request headers (can be changed if a provider requires another HWID)
+HAPP_USER_AGENT = "Happ/4.4.1/Android/17891107313301967518"
+HAPP_HWID = "6b77631a1de1c0e8"
+
 def fetch(url):
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 kafka-sub-proxy-parser/1.0"})
+    headers = {
+        "User-Agent": HAPP_USER_AGENT,
+        "X-HWID": HAPP_HWID,
+        "Accept": "*/*",
+    }
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=30) as r:
         data = r.read(MAX_BYTES + 1)
     if len(data) > MAX_BYTES:
