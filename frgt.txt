@@ -1,4 +1,4 @@
 #subscription-userinfo: upload=1073741824000; download=0; total=1073741824000; expire=2524608000
 #profile-title: frgt
 #profile-update-interval: 1
-#announce: rudy & cheesyx // обновлено: 21.09.2026 16:27 | конфигов: 0
+#announce: rudy & cheesyx // обновлено: 21.09.2026 16:43 | конфигов: 0
