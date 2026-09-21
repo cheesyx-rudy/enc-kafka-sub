@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, base64, json, re, urllib.parse, urllib.request
+import argparse, base64, json, os, re, urllib.error, urllib.parse, urllib.request
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
@@ -9,12 +9,41 @@ MAX_BYTES = 20 * 1024 * 1024
 
 URI_RE = re.compile(r"(?i)\b(?:vless|vmess|trojan|ss|ssr|hysteria2?|hy2|tuic|anytls|socks5?|http)://[^\s<>\"']+")
 
-def fetch(url):
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 kafka-sub-proxy-parser/1.0"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        data = r.read(MAX_BYTES + 1)
+def load_pass():
+    value = os.environ.get("PASS", "").strip()
+    if value:
+        return value
+    env_path = Path(".env")
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            if key.strip() == "PASS":
+                return val.strip().strip('\"').strip("'")
+    raise SystemExit("PASS is not set: provide PASS in the environment or in .env")
+
+
+def fetch(url, password):
+    payload = json.dumps({"url": url, "password": password}).encode("utf-8")
+    req = urllib.request.Request(
+        "https://quic.best/pass",
+        data=payload,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            data = r.read(MAX_BYTES + 1)
+            status = r.status
+    except urllib.error.HTTPError as e:
+        body = e.read(4096).decode("utf-8", errors="replace")
+        raise RuntimeError(f"API returned HTTP {e.code}: {body[:1000]}") from e
+    if status < 200 or status >= 300:
+        raise RuntimeError(f"API returned HTTP {status}")
     if len(data) > MAX_BYTES:
-        raise ValueError("source is larger than 20 MiB")
+        raise ValueError("API response is larger than 20 MiB")
     return data.decode("utf-8", errors="replace")
 
 def extract_uris(text, depth=0):
@@ -114,11 +143,14 @@ def main():
         if not SOURCES_FILE.exists():
             raise SystemExit("proxy_sources.txt not found")
         sources = [x.strip() for x in SOURCES_FILE.read_text(encoding="utf-8").splitlines() if x.strip() and not x.lstrip().startswith("#")]
+        if len(sources) != 1:
+            raise SystemExit(f"proxy_sources.txt must contain exactly one source URL, found {len(sources)}")
+        password = load_pass()
         unique, seen = [], set()
         mlkem_skipped = 0
         for source in sources:
             try:
-                items = extract_uris(fetch(source))
+                items = extract_uris(fetch(source, password))
                 added = 0
                 source_mlkem = 0
                 for uri in items:
@@ -132,7 +164,7 @@ def main():
                         continue
                     unique.append(uri)
                     added += 1
-                print(f"[SOURCE] {source} -> {added} new proxy URLs" + (f" (skipped {source_mlkem} ML-KEM)" if source_mlkem else ""))
+                print(f"[SOURCE] {source} -> API /pass -> {added} new proxy URLs" + (f" (skipped {source_mlkem} ML-KEM)" if source_mlkem else ""))
             except Exception as e:
                 print(f"[SOURCE ERROR] {source}: {e}")
         print(f"[FILTER] skipped {mlkem_skipped} ML-KEM encryption proxies")
