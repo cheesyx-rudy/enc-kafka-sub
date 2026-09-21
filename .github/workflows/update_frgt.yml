@@ -38,8 +38,8 @@ jobs:
 
       - name: Build frgt.txt
         env:
-          UPDATE_MODE: ${{ github.event_name == 'schedule' && 'fresh' || inputs.mode }}
           PASS: ${{ secrets.PASS }}
+          UPDATE_MODE: ${{ github.event_name == 'schedule' && 'fresh' || inputs.mode }}
         run: |
           set -euo pipefail
           python proxy_parser.py --mode "$UPDATE_MODE"
