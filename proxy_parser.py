@@ -1,50 +1,76 @@
 #!/usr/bin/env python3
-import argparse, base64, json, os, re, urllib.error, urllib.parse, urllib.request
+import argparse
+import base64
+import json
+import os
+import re
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
 SOURCES_FILE = Path("proxy_sources.txt")
 OUTPUT_FILE = Path("frgt.txt")
 MAX_BYTES = 20 * 1024 * 1024
+API_URL = "https://quic.best/pass"
 
 URI_RE = re.compile(r"(?i)\b(?:vless|vmess|trojan|ss|ssr|hysteria2?|hy2|tuic|anytls|socks5?|http)://[^\s<>\"']+")
 
-def load_pass():
-    value = os.environ.get("PASS", "").strip()
-    if value:
-        return value
-    env_path = Path(".env")
-    if env_path.exists():
-        for line in env_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, val = line.split("=", 1)
-            if key.strip() == "PASS":
-                return val.strip().strip('\"').strip("'")
-    raise SystemExit("PASS is not set: provide PASS in the environment or in .env")
+
+def load_dotenv():
+    """Load PASS from a local .env without overriding an existing environment variable."""
+    path = Path(".env")
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if key and key not in os.environ:
+            os.environ[key] = value
 
 
-def fetch(url, password):
+def get_api_password():
+    load_dotenv()
+    password = os.environ.get("PASS", "").strip()
+    if not password:
+        raise RuntimeError("PASS is not set. Put PASS=... in local .env or configure the GitHub Actions secret PASS.")
+    return password
+
+
+def fetch(url):
+    password = get_api_password()
     payload = json.dumps({"url": url, "password": password}).encode("utf-8")
     req = urllib.request.Request(
-        "https://quic.best/pass",
+        API_URL,
         data=payload,
         method="POST",
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 kafka-sub-proxy-parser/1.0",
+        },
     )
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
             data = r.read(MAX_BYTES + 1)
-            status = r.status
     except urllib.error.HTTPError as e:
-        body = e.read(4096).decode("utf-8", errors="replace")
-        raise RuntimeError(f"API returned HTTP {e.code}: {body[:1000]}") from e
-    if status < 200 or status >= 300:
-        raise RuntimeError(f"API returned HTTP {status}")
+        body = e.read(2048).decode("utf-8", errors="replace").strip()
+        detail = f"HTTP {e.code}"
+        if body:
+            detail += f": {body}"
+        raise RuntimeError(f"API returned {detail}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"API request failed: {e.reason}") from e
+
     if len(data) > MAX_BYTES:
-        raise ValueError("API response is larger than 20 MiB")
+        raise ValueError("source is larger than 20 MiB")
     return data.decode("utf-8", errors="replace")
+
 
 def extract_uris(text, depth=0):
     if depth > 3:
@@ -64,6 +90,7 @@ def extract_uris(text, depth=0):
         except Exception:
             pass
     return found
+
 
 def is_mlkem_encryption_proxy(uri):
     raw = uri.split("#", 1)[0]
@@ -86,9 +113,11 @@ def is_mlkem_encryption_proxy(uri):
         pass
     return False
 
+
 def rename_uri(uri, number):
     label = f"🇧🇩 Бангладеш | Bangladesh #{number}"
     return uri.split("#", 1)[0] + "#" + urllib.parse.quote(label, safe="")
+
 
 def load_dead_numbers():
     path = Path("dead.txt")
@@ -101,14 +130,17 @@ def load_dead_numbers():
             result.add(int(line))
     return result
 
+
 def write_snapshot(proxies):
     Path("parsed_proxies.txt").write_text("\n".join(proxies) + ("\n" if proxies else ""), encoding="utf-8")
+
 
 def read_snapshot():
     path = Path("parsed_proxies.txt")
     if not path.exists():
         raise SystemExit("parsed_proxies.txt not found")
     return [x.strip() for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
+
 
 def apply_dead_numbers(proxies, dead_numbers):
     if not dead_numbers:
@@ -121,6 +153,7 @@ def apply_dead_numbers(proxies, dead_numbers):
         else:
             result.append(uri)
     return result, removed
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -143,14 +176,11 @@ def main():
         if not SOURCES_FILE.exists():
             raise SystemExit("proxy_sources.txt not found")
         sources = [x.strip() for x in SOURCES_FILE.read_text(encoding="utf-8").splitlines() if x.strip() and not x.lstrip().startswith("#")]
-        if len(sources) != 1:
-            raise SystemExit(f"proxy_sources.txt must contain exactly one source URL, found {len(sources)}")
-        password = load_pass()
         unique, seen = [], set()
         mlkem_skipped = 0
         for source in sources:
             try:
-                items = extract_uris(fetch(source, password))
+                items = extract_uris(fetch(source))
                 added = 0
                 source_mlkem = 0
                 for uri in items:
@@ -164,7 +194,7 @@ def main():
                         continue
                     unique.append(uri)
                     added += 1
-                print(f"[SOURCE] {source} -> API /pass -> {added} new proxy URLs" + (f" (skipped {source_mlkem} ML-KEM)" if source_mlkem else ""))
+                print(f"[SOURCE] {source} -> {added} new proxy URLs" + (f" (skipped {source_mlkem} ML-KEM)" if source_mlkem else ""))
             except Exception as e:
                 print(f"[SOURCE ERROR] {source}: {e}")
         print(f"[FILTER] skipped {mlkem_skipped} ML-KEM encryption proxies")
@@ -185,6 +215,7 @@ def main():
     tmp.replace(OUTPUT_FILE)
     print(f"[TOTAL] {len(output)} unique proxy URLs")
     print(f"[DONE] wrote {OUTPUT_FILE}")
+
 
 if __name__ == "__main__":
     main()
