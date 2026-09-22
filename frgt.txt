@@ -1,6 +1,6 @@
 #subscription-userinfo: upload=1073741824000; download=0; total=1073741824000; expire=2524608000
 #profile-title: frgt
 #profile-update-interval: 1
-#announce: rudy & cheesyx // обновлено: 22.09.2026 02:27 | конфигов: 2
-vless://eb72bff6-b087-4609-b1e0-664c0d1f35f1@localhost:13994?type=tcp\u0026security=reality\u0026pbk=1111111111111111111111111111111111111111111\u0026fp=chrome\u0026sni=xx.xx\u0026sid=26a70553\u0026spx=%2F\u0026flow=xtls-rprx-vision#%F0%9F%87%A7%F0%9F%87%A9%20%D0%91%D0%B0%D0%BD%D0%B3%D0%BB%D0%B0%D0%B4%D0%B5%D1%88%20%7C%20Bangladesh%20%231
-vless://eb72bff6-b087-4609-b1e0-664c0d1f35f1@localhost:13994?type=tcp&security=reality&pbk=1111111111111111111111111111111111111111111&fp=chrome&sni=xx.xx&sid=26a70553&spx=%2F&flow=xtls-rprx-vision#%F0%9F%87%A7%F0%9F%87%A9%20%D0%91%D0%B0%D0%BD%D0%B3%D0%BB%D0%B0%D0%B4%D0%B5%D1%88%20%7C%20Bangladesh%20%232
+#announce: rudy & cheesyx // обновлено: 22.09.2026 04:41 | конфигов: 2
+vless://947dd954-6c73-4aa5-a7bc-482eda428553@localhost:17798?type=tcp\u0026security=reality\u0026pbk=1111111111111111111111111111111111111111111\u0026fp=chrome\u0026sni=xx.xx\u0026sid=26a70553\u0026spx=%2F\u0026flow=xtls-rprx-vision#%F0%9F%87%A7%F0%9F%87%A9%20%D0%91%D0%B0%D0%BD%D0%B3%D0%BB%D0%B0%D0%B4%D0%B5%D1%88%20%7C%20Bangladesh%20%231
+vless://947dd954-6c73-4aa5-a7bc-482eda428553@localhost:17798?type=tcp&security=reality&pbk=1111111111111111111111111111111111111111111&fp=chrome&sni=xx.xx&sid=26a70553&spx=%2F&flow=xtls-rprx-vision#%F0%9F%87%A7%F0%9F%87%A9%20%D0%91%D0%B0%D0%BD%D0%B3%D0%BB%D0%B0%D0%B4%D0%B5%D1%88%20%7C%20Bangladesh%20%232
