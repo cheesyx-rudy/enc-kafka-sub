@@ -1,4 +1,0 @@
-#subscription-userinfo: upload=1073741824000; download=0; total=1073741824000; expire=2524608000
-#profile-title: rudy and kafka
-#profile-update-interval: 1
-#announce: авторы @rudy_bd @kafka_def // обновлено: 22.09.2026 21:57 | конфигов: 0
