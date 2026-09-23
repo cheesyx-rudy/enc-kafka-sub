@@ -15,7 +15,7 @@ import random
 
 SUBSCRIPTION_URL = (
     "https://ssconnect.app/?url_ha="
-    "https://flaregate.dedyn.io/api/v1/sub/7wH9ySRsmQizQNdQjkcing"
+    "https://flaregate.dedyn.io/api/v1/sub/ZOdmowPbiCKEjcBcFljkxQ"
 )
 OUTPUT = Path("frgt.txt")
 CACHE_DIR = Path(".cache")
