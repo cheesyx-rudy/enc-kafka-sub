@@ -9,7 +9,7 @@ import time
 import sys
 import os
 
-SUBSCRIPTION_URL = "https://ssconnect.app/?url_ha=https://flaregate.dedyn.io/api/v1/sub/7wH9ySRsmQizQNdQjkcing"
+SUBSCRIPTION_URL = "https://ssconnect.app/?url_ha=https://flaregate.dedyn.io/api/v1/sub/fIpgIGk_YxDHxNbU5XFWLA"
 OUTPUT = Path("frgt.txt")
 CACHE_DIR = Path(".cache")
 CACHE_FILE = CACHE_DIR / "frgt.txt"
