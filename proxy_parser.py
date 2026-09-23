@@ -9,13 +9,14 @@ import time
 import sys
 import os
 
-SUBSCRIPTION_URL = "https://ssconnect.app/?url_ha=https://flaregate.dedyn.io/api/v1/sub/fIpgIGk_YxDHxNbU5XFWLA"
+SUBSCRIPTION_URL = "https://ssconnect.app/?url_ha=https://flaregate.dedyn.io/api/v1/sub/7wH9ySRsmQizQNdQjkcing"
 OUTPUT = Path("frgt.txt")
 CACHE_DIR = Path(".cache")
 CACHE_FILE = CACHE_DIR / "frgt.txt"
 RAW_DIR = Path(".raw")
 CACHE_TTL = int(os.getenv("SUBSCRIPTION_CACHE_TTL", "1800"))
 
+# Original application identity. Kept unchanged from the supplied parser.
 USER_AGENT = "Happ/4.4.1/Android/17891107313301967618"
 DEVICE_OS = "Android"
 DEVICE_VER_OS = "16"
@@ -23,9 +24,22 @@ DEVICE_MODEL = "24117RN76O"
 HWID = "6b77631a1de1c0e8"
 DEVICE_LOCALE = "ru"
 
+# Optional browser-like HTTP profile.
+# Default is OFF so the supplied, already-tested Happ request remains unchanged.
+# Set BROWSER_MODE=1 when the endpoint specifically requires browser-like headers.
+BROWSER_MODE = os.getenv("BROWSER_MODE", "0").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+BROWSER_USER_AGENT = os.getenv(
+    "BROWSER_USER_AGENT",
+    "Mozilla/5.0 (Linux; Android 16; 24117RN76O) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/140.0.0.0 Mobile Safari/537.36",
+)
 
-def build_headers():
-    return {
+
+def build_headers(browser=False):
+    headers = {
         "User-Agent": USER_AGENT,
         "X-Device-Os": DEVICE_OS,
         "X-Device-Locale": DEVICE_LOCALE,
@@ -36,6 +50,25 @@ def build_headers():
         "Accept-Encoding": "gzip, deflate",
         "Connection": "close",
     }
+
+    if browser:
+        headers.update({
+            "User-Agent": BROWSER_USER_AGENT,
+            "Accept": (
+                "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                "image/avif,image/webp,image/apng,*/*;q=0.8"
+            ),
+            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+        })
+
+    return headers
 
 
 def decode_body(raw, encoding):
@@ -50,8 +83,11 @@ def decode_body(raw, encoding):
     return raw
 
 
-def http_get(url):
-    req = Request(url, headers=build_headers(), method="GET")
+def http_get(url, browser=None):
+    if browser is None:
+        browser = BROWSER_MODE
+
+    req = Request(url, headers=build_headers(browser=browser), method="GET")
     opener = build_opener(HTTPRedirectHandler())
     try:
         with opener.open(req, timeout=30) as resp:
@@ -64,13 +100,17 @@ def http_get(url):
         status = e.code
         headers = dict(e.headers or {})
         raw = e.read()
+
     body = decode_body(raw, headers.get("Content-Encoding", ""))
     return final_url, status, headers, body
 
 
 RE_URL_HA = re.compile(r"[?&]url_ha=([^&\s\"'<>]+)", re.IGNORECASE)
-RE_HAPP_DEEPLINK = re.compile(r"happ://add/(https?://[^\s\"'<>)]+)", re.IGNORECASE)
-RE_SUB_URL = re.compile(r"https?://[^\s\"'<>]+/api/v1/sub/[A-Za-z0-9_\-]+", re.IGNORECASE)
+RE_HAPP_DEEPLINK = re.compile(r"happ://add/(https?://[^\s\"'<>]+)", re.IGNORECASE)
+RE_SUB_URL = re.compile(
+    r"https?://[^\s\"'<>]+/api/v1/sub/[A-Za-z0-9_\-]+",
+    re.IGNORECASE,
+)
 RE_GENERIC_HTTP = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
 
 
@@ -84,8 +124,10 @@ def looks_like_html(body, headers):
 
 def is_proxy_config(body):
     sample = body[:5000]
-    markers = (b"vless://", b"vmess://", b"trojan://", b"ss://",
-               b"socks://", b"hy2://", b"hysteria2://", b"hysteria://")
+    markers = (
+        b"vless://", b"vmess://", b"trojan://", b"ss://",
+        b"socks://", b"hy2://", b"hysteria2://", b"hysteria://"
+    )
     return any(m in sample for m in markers)
 
 
