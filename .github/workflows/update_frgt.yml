@@ -15,6 +15,7 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - name: Checkout
@@ -28,7 +29,9 @@ jobs:
       - name: Restore subscription cache
         uses: actions/cache@v4
         with:
-          path: frgt.txt
+          path: |
+            frgt.txt
+            .cache/frgt.txt
           key: frgt-subscription-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
             frgt-subscription-${{ github.ref_name }}-
@@ -36,7 +39,7 @@ jobs:
       - name: Generate frgt.txt
         run: python proxy_parser.py
 
-      - name: Save frgt.txt
+      - name: Commit frgt.txt
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
