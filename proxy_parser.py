@@ -1,5 +1,5 @@
 from pathlib import Path
-from urllib.request import Request, build_opener, HTTPRedirectHandler
+from urllib.request import Request, build_opener, HTTPRedirectHandler, HTTPSHandler
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urlparse
 import gzip
@@ -9,13 +9,12 @@ import time
 import sys
 import os
 import ssl
-import random
 
 # ---------------------------------------------------------------- config
 
 SUBSCRIPTION_URL = (
     "https://ssconnect.app/?url_ha="
-    "https://flaregate.dedyn.io/api/v1/sub/ZOdmowPbiCKEjcBcFljkxQ"
+    "https://flaregate.dedyn.io/api/v1/sub/7wH9ySRsmQizQNdQjkcing"
 )
 OUTPUT = Path("frgt.txt")
 CACHE_DIR = Path(".cache")
@@ -34,7 +33,6 @@ except Exception:
 
 # ---------------------------------------------------------------- headers
 
-# Реалистичный набор заголовков Chrome 131 на Android.
 _CHROME_UA = (
     "Mozilla/5.0 (Linux; Android 14; 24117RN76O) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -42,7 +40,7 @@ _CHROME_UA = (
 )
 
 
-def browser_headers(referer: str | None = None, accept_html: bool = True) -> dict:
+def browser_headers(referer=None, accept_html=True):
     """Полноценная имитация браузера Chrome на Android."""
     if accept_html:
         accept = (
@@ -83,11 +81,10 @@ def browser_headers(referer: str | None = None, accept_html: bool = True) -> dic
     return h
 
 
-# Фирменные заголовки приложения Happ (Proxy utility).
 HAPP_UA = "Happ/4.4.1/Android/17891107313301967618"
 
 
-def happ_headers(referer: str | None = None) -> dict:
+def happ_headers(referer=None):
     h = {
         "User-Agent": HAPP_UA,
         "X-Device-Os": "Android",
@@ -109,7 +106,7 @@ def happ_headers(referer: str | None = None) -> dict:
 
 # ---------------------------------------------------------------- decoding
 
-def decode_body(raw: bytes, encoding: str) -> bytes:
+def decode_body(raw, encoding):
     encoding = (encoding or "").lower().strip()
     if not encoding:
         return raw
@@ -137,12 +134,14 @@ _CTX = ssl.create_default_context()
 _CTX.check_hostname = False
 _CTX.verify_mode = ssl.CERT_NONE
 
+_HTTPS_HANDLER = HTTPSHandler(context=_CTX)
+_OPENER = build_opener(HTTPRedirectHandler(), _HTTPS_HANDLER)
 
-def http_get(url: str, headers: dict, label: str):
+
+def http_get(url, headers, label=""):
     req = Request(url, headers=headers, method="GET")
-    opener = build_opener(HTTPRedirectHandler())
     try:
-        with opener.open(req, timeout=30, context=_CTX) as resp:
+        with _OPENER.open(req, timeout=30) as resp:
             final_url = resp.geturl()
             status = resp.status
             hdrs = dict(resp.headers)
@@ -164,7 +163,7 @@ RE_SUB_URL = re.compile(r"https?://[^\s\"'<>]+/api/v1/sub/[A-Za-z0-9_\-]+", re.I
 RE_GENERIC_HTTP = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
 
 
-def looks_like_html(body: bytes, headers: dict) -> bool:
+def looks_like_html(body, headers):
     ctype = (headers.get("Content-Type") or "").lower()
     if "html" in ctype:
         return True
@@ -177,7 +176,7 @@ def looks_like_html(body: bytes, headers: dict) -> bool:
     )
 
 
-def is_proxy_config(body: bytes) -> bool:
+def is_proxy_config(body):
     sample = body[:8000]
     markers = (
         b"vless://", b"vmess://", b"trojan://", b"ss://",
@@ -187,25 +186,21 @@ def is_proxy_config(body: bytes) -> bool:
     return any(m in sample for m in markers)
 
 
-def extract_real_url(html: bytes, original_url: str) -> str | None:
+def extract_real_url(html, original_url):
     text = html.decode("utf-8", errors="replace")
 
-    # 1. happ://add/<url>
     m = RE_HAPP_DEEPLINK.search(text)
     if m:
         return unquote(m.group(1))
 
-    # 2. url_ha=... в исходном URL
     m = RE_URL_HA.search(original_url)
     if m:
         return unquote(m.group(1))
 
-    # 3. Прямая ссылка /api/v1/sub/...
     m = RE_SUB_URL.search(text)
     if m:
         return m.group(0)
 
-    # 4. Любая http(s)-ссылка, где есть "sub" и это не сам ssconnect.app
     for m in RE_GENERIC_HTTP.finditer(text):
         candidate = m.group(0).rstrip(".,;\"')")
         low = candidate.lower()
@@ -218,7 +213,7 @@ def extract_real_url(html: bytes, original_url: str) -> str | None:
 
 # ---------------------------------------------------------------- cache
 
-def valid_cache() -> bool:
+def valid_cache():
     if NO_CACHE:
         return False
     return CACHE_FILE.exists() and (time.time() - CACHE_FILE.stat().st_mtime) < CACHE_TTL
@@ -229,7 +224,7 @@ def ensure_output():
         OUTPUT.write_bytes(b"")
 
 
-def save_raw(name: str, url: str, status: int, headers: dict, body: bytes):
+def save_raw(name, url, status, headers, body):
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     (RAW_DIR / (name + "_body.bin")).write_bytes(body)
     with (RAW_DIR / (name + "_headers.txt")).open("w", encoding="utf-8") as f:
@@ -241,25 +236,18 @@ def save_raw(name: str, url: str, status: int, headers: dict, body: bytes):
 
 # ---------------------------------------------------------------- pipeline
 
-def fetch_subscription() -> bytes:
-    """
-    Фаза 1 — ssconnect.app как браузер Chrome.
-    Фаза 2 — реальная подписка как приложение Happ.
-    """
+def fetch_subscription():
     # --- Фаза 1: браузер ---
     h1 = browser_headers(accept_html=True)
     final_url, status, headers, body = http_get(SUBSCRIPTION_URL, h1, "browser")
     save_raw("phase1_browser", final_url, status, headers, body)
 
-    # Если сервер сразу отдал прокси-конфиг — отдаём как есть
     if is_proxy_config(body):
         return body
 
-    # Если это не HTML и не прокси-конфиг — вернём как есть
     if not looks_like_html(body, headers):
         return body
 
-    # --- Извлекаем реальную ссылку ---
     real_url = extract_real_url(body, SUBSCRIPTION_URL)
     if not real_url:
         return body
@@ -280,7 +268,7 @@ def fetch_subscription() -> bytes:
     return body2
 
 
-def main() -> int:
+def main():
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     ensure_output()
 
