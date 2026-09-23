@@ -1,115 +1,45 @@
 from pathlib import Path
-from urllib.request import Request, build_opener, HTTPRedirectHandler, HTTPSHandler
+from urllib.request import Request, build_opener, HTTPRedirectHandler
 from urllib.error import HTTPError, URLError
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote
 import gzip
 import zlib
 import re
 import time
 import sys
 import os
-import ssl
 
-# ---------------------------------------------------------------- config
-
-SUBSCRIPTION_URL = (
-    "https://ssconnect.app/?url_ha="
-    "https://flaregate.dedyn.io/api/v1/sub/7wH9ySRsmQizQNdQjkcing"
-)
+SUBSCRIPTION_URL = "https://ssconnect.app/?url_ha=https://flaregate.dedyn.io/api/v1/sub/7wH9ySRsmQizQNdQjkcing"
 OUTPUT = Path("frgt.txt")
 CACHE_DIR = Path(".cache")
 CACHE_FILE = CACHE_DIR / "frgt.txt"
 RAW_DIR = Path(".raw")
 CACHE_TTL = int(os.getenv("SUBSCRIPTION_CACHE_TTL", "1800"))
-NO_CACHE = os.getenv("SUBSCRIPTION_NO_CACHE", "").lower() in ("1", "true", "yes")
 
-# ---------------------------------------------------------------- brotli
-
-try:
-    import brotli  # type: ignore
-    _HAS_BROTLI = True
-except Exception:
-    _HAS_BROTLI = False
-
-# ---------------------------------------------------------------- headers
-
-_CHROME_UA = (
-    "Mozilla/5.0 (Linux; Android 14; 24117RN76O) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/131.0.6778.135 Mobile Safari/537.36"
-)
+USER_AGENT = "Happ/4.4.1/Android/17891107313301967618"
+DEVICE_OS = "Android"
+DEVICE_VER_OS = "16"
+DEVICE_MODEL = "24117RN76O"
+HWID = "6b77631a1de1c0e8"
+DEVICE_LOCALE = "ru"
 
 
-def browser_headers(referer=None, accept_html=True):
-    """Полноценная имитация браузера Chrome на Android."""
-    if accept_html:
-        accept = (
-            "text/html,application/xhtml+xml,application/xml;q=0.9,"
-            "image/avif,image/webp,image/apng,*/*;q=0.8,"
-            "application/signed-exchange;v=b3;q=0.7"
-        )
-    else:
-        accept = "*/*"
-
-    h = {
-        "User-Agent": _CHROME_UA,
-        "Accept": accept,
-        "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Accept-Encoding": "gzip, deflate, br, zstd" if _HAS_BROTLI else "gzip, deflate",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-        "Sec-CH-UA": '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
-        "Sec-CH-UA-Mobile": "?1",
-        "Sec-CH-UA-Platform": '"Android"',
-        "Sec-CH-UA-Platform-Version": '"14.0.0"',
-        "Sec-CH-UA-Model": '"24117RN76O"',
-        "Sec-CH-UA-Full-Version-List": (
-            '"Chromium";v="131.0.6778.135", "Not_A Brand";v="24.0.0.0", '
-            '"Google Chrome";v="131.0.6778.135"'
-        ),
-        "Sec-Fetch-Site": "none" if not referer else "same-origin",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-User": "?1",
-        "Sec-Fetch-Dest": "document",
-        "DNT": "1",
-        "Priority": "u=0, i",
-    }
-    if referer:
-        h["Referer"] = referer
-    return h
-
-
-HAPP_UA = "Happ/4.4.1/Android/17891107313301967618"
-
-
-def happ_headers(referer=None):
-    h = {
-        "User-Agent": HAPP_UA,
-        "X-Device-Os": "Android",
-        "X-Device-Locale": "ru",
-        "X-Device-Model": "24117RN76O",
-        "X-Ver-Os": "16",
-        "X-Hwid": "6b77631a1de1c0e8",
+def build_headers():
+    return {
+        "User-Agent": USER_AGENT,
+        "X-Device-Os": DEVICE_OS,
+        "X-Device-Locale": DEVICE_LOCALE,
+        "X-Device-Model": DEVICE_MODEL,
+        "X-Ver-Os": DEVICE_VER_OS,
+        "X-Hwid": HWID,
         "Accept": "*/*",
         "Accept-Encoding": "gzip, deflate",
         "Connection": "close",
-        "X-App-Version": "4.4.1",
-        "X-App-Name": "Happ",
-        "X-Requested-With": "Happ",
     }
-    if referer:
-        h["Referer"] = referer
-    return h
 
-
-# ---------------------------------------------------------------- decoding
 
 def decode_body(raw, encoding):
-    encoding = (encoding or "").lower().strip()
-    if not encoding:
-        return raw
+    encoding = (encoding or "").lower()
     if encoding == "gzip":
         return gzip.decompress(raw)
     if encoding == "deflate":
@@ -117,45 +47,26 @@ def decode_body(raw, encoding):
             return zlib.decompress(raw)
         except zlib.error:
             return zlib.decompress(raw, -zlib.MAX_WBITS)
-    if encoding == "br" and _HAS_BROTLI:
-        return brotli.decompress(raw)
-    if encoding == "zstd":
-        try:
-            import zstandard  # type: ignore
-            return zstandard.ZstdDecompressor().decompress(raw)
-        except Exception:
-            return raw
     return raw
 
 
-# ---------------------------------------------------------------- http
-
-_CTX = ssl.create_default_context()
-_CTX.check_hostname = False
-_CTX.verify_mode = ssl.CERT_NONE
-
-_HTTPS_HANDLER = HTTPSHandler(context=_CTX)
-_OPENER = build_opener(HTTPRedirectHandler(), _HTTPS_HANDLER)
-
-
-def http_get(url, headers, label=""):
-    req = Request(url, headers=headers, method="GET")
+def http_get(url):
+    req = Request(url, headers=build_headers(), method="GET")
+    opener = build_opener(HTTPRedirectHandler())
     try:
-        with _OPENER.open(req, timeout=30) as resp:
+        with opener.open(req, timeout=30) as resp:
             final_url = resp.geturl()
             status = resp.status
-            hdrs = dict(resp.headers)
+            headers = dict(resp.headers)
             raw = resp.read()
     except HTTPError as e:
         final_url = e.geturl()
         status = e.code
-        hdrs = dict(e.headers or {})
+        headers = dict(e.headers or {})
         raw = e.read()
-    body = decode_body(raw, hdrs.get("Content-Encoding", ""))
-    return final_url, status, hdrs, body
+    body = decode_body(raw, headers.get("Content-Encoding", ""))
+    return final_url, status, headers, body
 
-
-# ---------------------------------------------------------------- parsing
 
 RE_URL_HA = re.compile(r"[?&]url_ha=([^&\s\"'<>]+)", re.IGNORECASE)
 RE_HAPP_DEEPLINK = re.compile(r"happ://add/(https?://[^\s\"'<>)]+)", re.IGNORECASE)
@@ -167,22 +78,14 @@ def looks_like_html(body, headers):
     ctype = (headers.get("Content-Type") or "").lower()
     if "html" in ctype:
         return True
-    head = body[:300].lstrip().lower()
-    return (
-        head.startswith(b"<!doctype")
-        or head.startswith(b"<html")
-        or b"<html" in head
-        or b"<body" in head
-    )
+    head = body[:200].lstrip().lower()
+    return head.startswith(b"<!doctype") or head.startswith(b"<html") or b"<html" in head
 
 
 def is_proxy_config(body):
-    sample = body[:8000]
-    markers = (
-        b"vless://", b"vmess://", b"trojan://", b"ss://",
-        b"socks://", b"hy2://", b"hysteria2://", b"hysteria://",
-        b"tuic://", b"wireguard://", b"ssh://",
-    )
+    sample = body[:5000]
+    markers = (b"vless://", b"vmess://", b"trojan://", b"ss://",
+               b"socks://", b"hy2://", b"hysteria2://", b"hysteria://")
     return any(m in sample for m in markers)
 
 
@@ -202,20 +105,14 @@ def extract_real_url(html, original_url):
         return m.group(0)
 
     for m in RE_GENERIC_HTTP.finditer(text):
-        candidate = m.group(0).rstrip(".,;\"')")
-        low = candidate.lower()
-        host = urlparse(candidate).netloc.lower()
-        if "sub" in low and "ssconnect.app" not in host:
+        candidate = m.group(0)
+        if "sub" in candidate.lower() and "ssconnect.app" not in candidate:
             return candidate
 
     return None
 
 
-# ---------------------------------------------------------------- cache
-
 def valid_cache():
-    if NO_CACHE:
-        return False
     return CACHE_FILE.exists() and (time.time() - CACHE_FILE.stat().st_mtime) < CACHE_TTL
 
 
@@ -234,13 +131,9 @@ def save_raw(name, url, status, headers, body):
             f.write(k + ": " + v + "\n")
 
 
-# ---------------------------------------------------------------- pipeline
-
 def fetch_subscription():
-    # --- Фаза 1: браузер ---
-    h1 = browser_headers(accept_html=True)
-    final_url, status, headers, body = http_get(SUBSCRIPTION_URL, h1, "browser")
-    save_raw("phase1_browser", final_url, status, headers, body)
+    final_url, status, headers, body = http_get(SUBSCRIPTION_URL)
+    save_raw("phase1", final_url, status, headers, body)
 
     if is_proxy_config(body):
         return body
@@ -252,19 +145,8 @@ def fetch_subscription():
     if not real_url:
         return body
 
-    # --- Фаза 2: приложение Happ ---
-    h2 = happ_headers(referer="https://ssconnect.app/")
-    final_url2, status2, headers2, body2 = http_get(real_url, h2, "happ")
-    save_raw("phase2_happ", final_url2, status2, headers2, body2)
-
-    # Если Happ-запрос не дал прокси-конфиг — повторяем как браузер
-    if not is_proxy_config(body2):
-        h3 = browser_headers(referer="https://ssconnect.app/", accept_html=False)
-        final_url3, status3, headers3, body3 = http_get(real_url, h3, "browser_fallback")
-        save_raw("phase2_browser_fallback", final_url3, status3, headers3, body3)
-        if is_proxy_config(body3):
-            return body3
-
+    final_url2, status2, headers2, body2 = http_get(real_url)
+    save_raw("phase2", final_url2, status2, headers2, body2)
     return body2
 
 
@@ -282,8 +164,11 @@ def main():
         return 0
 
     except (HTTPError, URLError, RuntimeError, OSError) as e:
-        print("error:", e, file=sys.stderr)
-        if valid_cache() or CACHE_FILE.exists():
+        print("error:", e)
+        if valid_cache():
+            OUTPUT.write_bytes(CACHE_FILE.read_bytes())
+            return 0
+        if CACHE_FILE.exists():
             OUTPUT.write_bytes(CACHE_FILE.read_bytes())
             return 0
         OUTPUT.write_bytes(b"")
